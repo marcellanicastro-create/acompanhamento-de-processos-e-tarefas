@@ -96,7 +96,9 @@
   .row .rt{margin-left:auto;text-align:right;flex-shrink:0}
   .pill{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap}
   .pill.red{background:var(--red-bg);color:var(--oxblood-dk)}.pill.amber{background:var(--amber-bg);color:#8a6a1e}
-  .pill.sage{background:var(--sage-bg);color:#3e5a3b}.pill.gray{background:#ece6d8;color:var(--ink-soft)}
+  .pill.sage{background:var(--sage-bg);color:#3e5a3b}.pill.gray{background:#ece6d8;color:var(--ink-soft)}.pill.blue{background:#dce6f0;color:#345b7a}
+  .przchip{background:var(--surface);border:1px solid var(--line-strong);border-radius:20px;padding:6px 14px;font-family:inherit;font-size:12.5px;font-weight:600;color:var(--ink-soft);cursor:pointer}
+  .przchip.on{background:var(--oxblood);color:#fff;border-color:var(--oxblood)}
   .empty{padding:24px 10px;text-align:center;color:var(--ink-soft);font-size:13px}
   .empty .ic{font-size:26px;display:block;margin-bottom:8px;opacity:.5}
 
@@ -219,6 +221,7 @@
     <section class="view" id="v-prazos">
       <div class="head"><div><h2>Prazos & Audiências</h2><div class="sub">Exporte para o Google Agenda com 1 toque</div></div>
         <button class="btn btn-gcal" onclick="document.getElementById('icsimp').click()" style="margin-right:8px">📥 Importar do Google</button><button class="btn btn-ghost" onclick="gSyncAll()" style="margin-right:8px">🔄 Enviar p/ Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button><input type="file" id="icsimp" accept=".ics,.zip,text/calendar" style="display:none" onchange="importICS(event)"></div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><button class="przchip on" data-f="Todos" onclick="setPrzFilter('Todos')">Todos</button><button class="przchip" data-f="Prazo" onclick="setPrzFilter('Prazo')">Prazos</button><button class="przchip" data-f="Audiência" onclick="setPrzFilter('Audiência')">Audiências</button><button class="przchip" data-f="Compromisso" onclick="setPrzFilter('Compromisso')">Compromissos</button><button class="przchip" style="margin-left:auto" onclick="clearPast()">🗑 Limpar vencidos</button></div>
       <div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div></div>
     </section>
 
@@ -308,6 +311,14 @@ function isHoliday(d){
 function isBiz(d){const wd=d.getDay();return wd!==0&&wd!==6&&!isHoliday(d)}
 function addBiz(startISO,n){let d=new Date(startISO+'T12:00:00');let c=0;while(c<n){d.setDate(d.getDate()+1);if(isBiz(d))c++}return d.toISOString().slice(0,10)}
 
+function formatCNJ(n){ n=String(n||'').replace(/\D/g,''); if(n.length!==20) return String(n||''); return n.slice(0,7)+'-'+n.slice(7,9)+'.'+n.slice(9,13)+'.'+n.slice(13,14)+'.'+n.slice(14,16)+'.'+n.slice(16,20); }
+function cvGetNumero(z){ if(z.numeroProc) return z.numeroProc; var m=(z.obs||'').match(/Processo:\s*([0-9.\-]+)/i); if(m) return m[1]; var t=(z.titulo||'').split('\u2014'); if(t.length>1) return t[1].trim(); return ''; }
+function cvCalc(){ var pub=val('cv-pub'), n=parseInt(val('cv-dias'),10); if(!pub||!n||n<1){ alert('Informe a data da publicação e os dias úteis.'); return; } var fatal=addBiz(pub,n); document.getElementById('cv-data').value=fatal; var r=document.getElementById('cv-res'); if(r){ r.classList.add('show'); r.innerHTML='✔ Prazo fatal sugerido: <b>'+fmtDate(fatal)+'</b> ('+n+' dias úteis após a publicação). Confira e ajuste se necessário.'; } }
+var PRZFILTER='Todos';
+function setPrzFilter(f){ PRZFILTER=f; renderPrazos(); }
+function clearPast(){ var past=DB.prazos.filter(function(z){return daysUntil(z.data)<0;}); if(!past.length){alert('Não há itens vencidos para limpar.');return;} if(!confirm('Excluir os '+past.length+' item(ns) já vencidos (data anterior a hoje)? Não dá pra desfazer.'))return; past.forEach(function(z){ if(z.gcalId&&gIsConnected())gDeleteRemote(z.gcalId); }); DB.prazos=DB.prazos.filter(function(z){return daysUntil(z.data)>=0;}); save('prazos',DB.prazos); renderAll(); }
+
+
 /* ===== seed ===== */
 async function seedIfEmpty(){
   if(await load('seeded',false))return;
@@ -386,10 +397,12 @@ function openProc(id){
 
 /* ===== prazos ===== */
 function renderPrazos(){
-  const list=[...DB.prazos].sort((a,b)=>a.data.localeCompare(b.data));
+  let list=[...DB.prazos].sort((a,b)=>a.data.localeCompare(b.data));
+  if(PRZFILTER!=='Todos')list=list.filter(function(z){return (z.tipo||'Prazo')===PRZFILTER;});
+  document.querySelectorAll('.przchip').forEach(function(c){c.classList.toggle('on',c.dataset.f===PRZFILTER);});
   document.getElementById('prz-body').innerHTML=list.length?list.map(z=>{
     const d=daysUntil(z.data),cls=d<0?'gray':d<=0?'red':d<=3?'amber':'sage',lab=d<0?'Passou':d===0?'Hoje':d===1?'Amanhã':`${d}d`;
-    return`<tr><td><b>${fmtDate(z.data)}</b>${z.hora?'<div class="me">'+z.hora+'</div>':''}<div style="margin-top:4px"><span class="pill ${cls}">${lab}</span></div></td><td><span class="pill ${z.tipo==='Audiência'?'amber':'sage'}">${z.tipo}</span></td><td><b>${esc(z.titulo)}</b>${z.local?'<div class="me">📍 '+esc(z.local)+'</div>':''}${z.obs?'<div class="me">'+esc(z.obs)+'</div>':''}</td><td>${esc(clienteProc(z.processoId))}</td><td style="white-space:nowrap"><button class="btn btn-gcal btn-sm" onclick="gcal('${z.id}')">+ Agenda</button> <button class="del" onclick="delPrazo('${z.id}')">🗑</button>${z.gcalId?'<div class="me" style="color:#3e5a3b;font-weight:600;margin-top:5px">✓ no Google</div>':''}</td></tr>`;
+    return`<tr><td><b>${fmtDate(z.data)}</b>${z.hora?'<div class="me">'+z.hora+'</div>':''}<div style="margin-top:4px"><span class="pill ${cls}">${lab}</span></div><button class="del" onclick="delPrazo('${z.id}')" style="margin-top:8px;font-size:12px;font-weight:600">🗑 Excluir</button></td><td><span class="pill ${z.tipo==='Audiência'?'amber':(z.tipo==='Compromisso'?'blue':'sage')}">${z.tipo}</span></td><td><b>${esc(z.titulo)}</b>${z.local?'<div class="me">📍 '+esc(z.local)+'</div>':''}${z.obs?'<div class="me">'+esc(z.obs)+'</div>':''}</td><td>${esc(clienteProc(z.processoId))}</td><td style="white-space:nowrap">${z.fonte==='DJEN'?'<button class="btn btn-primary btn-sm" style="margin-bottom:5px" onclick="openModal(\'converter\',\''+z.id+'\')">→ Cadastrar processo</button><br>':''}<button class="btn btn-gcal btn-sm" onclick="gcal('${z.id}')">+ Agenda</button>${z.gcalId?'<div class="me" style="color:#3e5a3b;font-weight:600;margin-top:5px">✓ no Google</div>':''}</td></tr>`;
   }).join(''):`<tr><td colspan="5">${empty('⏱','Nenhum prazo cadastrado.')}</td></tr>`;
 }
 function delPrazo(id){const z=DB.prazos.find(z=>z.id===id);if(!z)return;if(!confirm('Excluir este prazo?'+(z.gcalId?' (também sai do Google Agenda)':'')))return;if(z.gcalId&&gIsConnected())gDeleteRemote(z.gcalId);DB.prazos=DB.prazos.filter(x=>x.id!==id);save('prazos',DB.prazos);renderAll()}
@@ -523,7 +536,7 @@ function openModal(type,arg){
       <div class="frow"><div class="field" style="margin:0"><label>Data da intimação/publicação</label><input type="date" id="c-pub" value="${todayISO()}"></div><div class="field" style="margin:0"><label>Prazo (dias úteis)</label><input type="number" id="c-dias" placeholder="15" min="1"></div></div>
       <button class="btn btn-calc btn-sm" style="margin-top:10px" onclick="calcPrazo()">Calcular data fatal</button>
       <div class="calc-res" id="calc-res"></div></div>
-    <div class="field"><label>Tipo</label><select id="f-tipo"><option>Prazo</option><option>Audiência</option></select></div>
+    <div class="field"><label>Tipo</label><select id="f-tipo"><option>Prazo</option><option>Audiência</option><option>Compromisso</option></select></div>
     <div class="field"><label>Descrição</label><input id="f-tit" placeholder="Contestação / Audiência de instrução"></div>
     <div class="frow"><div class="field"><label>Data fatal</label><input type="date" id="f-data" value="${todayISO()}"></div><div class="field"><label>Hora (audiência)</label><input type="time" id="f-hora"></div></div>
     <div class="field"><label>Processo vinculado</label><select id="f-proc"><option value="">— nenhum —</option>${opts}</select></div>
@@ -548,6 +561,23 @@ function openModal(type,arg){
     <div class="field"><label>Buscar dos últimos (dias)</label><input type="number" id="dj-dias" value="30" min="1"></div>
     <div style="margin-top:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="djBuscar()">Buscar publicações</button><span id="dj-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>
     <div class="note" style="margin-top:14px">As publicações entram como Prazos com a <b>data de disponibilização</b> e o texto completo nas observações. <b>Não são prazos prontos</b> — leia cada uma e calcule o prazo fatal. Clique em Salvar para guardar o endereço e a OAB.</div>`;}
+  else if(type==='converter'){
+    var zc=DB.prazos.find(function(p){return p.id===arg;});
+    if(zc){
+    var numc=formatCNJ(cvGetNumero(zc));
+    setTitle('Cadastrar processo + prazo');
+    var cliOptsC=DB.clientes.map(function(c){return '<option value="'+c.id+'">'+esc(c.nome)+'</option>';}).join('');
+    body.innerHTML='<div class="note" style="margin-bottom:14px">Da publicação: <b>'+esc(zc.titulo)+'</b></div>'
+    +'<div class="field"><label>Número do processo</label><input id="cv-num" value="'+esc(numc)+'"></div>'
+    +'<div class="field"><label>Cliente</label><select id="cv-cli" onchange="document.getElementById(\'cv-newwrap\').style.display=(this.value===\'__new\')?\'block\':\'none\'">'+cliOptsC+'<option value="__new">+ Novo cliente…</option></select></div>'
+    +'<div class="field" id="cv-newwrap" style="display:none"><label>Nome do novo cliente</label><input id="cv-newcli"></div>'
+    +'<div class="frow"><div class="field"><label>Vara</label><input id="cv-vara" value="'+esc(zc.local||'')+'"></div><div class="field"><label>Tribunal</label><input id="cv-trib" placeholder="TJ-SP"></div></div>'
+    +'<div class="field"><label>Objeto / assunto</label><input id="cv-obj"></div>'
+    +'<div class="calc-box"><div class="ct">⏱ Prazo</div><div class="frow"><div class="field" style="margin:0"><label>Data da publicação</label><input type="date" id="cv-pub" value="'+esc(zc.data)+'"></div><div class="field" style="margin:0"><label>Prazo (dias úteis)</label><input type="number" id="cv-dias" placeholder="15"></div></div><button class="btn btn-calc btn-sm" style="margin-top:10px" onclick="cvCalc()">Calcular data fatal</button><div class="calc-res" id="cv-res"></div></div>'
+    +'<div class="frow"><div class="field"><label>Descrição do prazo</label><input id="cv-tit" value="Cumprir intimação"></div><div class="field"><label>Data fatal</label><input type="date" id="cv-data" value="'+esc(zc.data)+'"></div></div>'
+    +'<div class="note">Ao cadastrar: cria o processo (com a intimação na linha do tempo) e agenda o prazo. A publicação sai da lista solta.</div>';
+    }
+  }
   document.getElementById('overlay').classList.add('open');
 }
 function calcPrazo(){
@@ -570,6 +600,20 @@ document.getElementById('modal-save').onclick=()=>{
   else if(type==='atend'){DB.atendimentos.push({id:uid(),clienteId:val('f-cli'),data:val('f-data'),titulo:val('f-tit'),notas:val('f-notas')});save('atendimentos',DB.atendimentos)}
   if(type==='google'){GCLIENT=val('g-cid');save('gclient',GCLIENT);var _s=document.getElementById('g-status');if(_s)_s.textContent='Código salvo — agora clique em Conectar.';return;}
   if(type==='djen'){djSaveCfg();var _d=document.getElementById('dj-status');if(_d)_d.textContent='Endereço e OAB salvos.';return;}
+  if(type==='converter'){
+    var zc=DB.prazos.find(function(p){return p.id===arg;});
+    if(!zc){closeModal();return;}
+    var num=val('cv-num'); if(!num){alert('Informe o número do processo.');return;}
+    var cliId=val('cv-cli');
+    if(cliId==='__new'){ var nm=val('cv-newcli'); if(!nm){alert('Informe o nome do novo cliente.');return;} var nc={id:uid(),nome:nm,tel:'',email:'',obs:''}; DB.clientes.push(nc); cliId=nc.id; save('clientes',DB.clientes); }
+    var proc={id:uid(),numero:num,clienteId:cliId,vara:val('cv-vara'),tribunal:val('cv-trib'),objeto:val('cv-obj'),status:'Em andamento',andamentos:[{id:uid(),data:zc.data,texto:'Intimação (DJEN): '+((zc.obs||zc.titulo)||'')}]};
+    DB.processos.push(proc); save('processos',DB.processos);
+    DB.prazos.push({id:uid(),tipo:(zc.tipo||'Prazo'),titulo:(val('cv-tit')||'Prazo'),data:val('cv-data'),hora:'',local:val('cv-vara'),obs:'',processoId:proc.id});
+    DB.prazos=DB.prazos.filter(function(p){return p.id!==zc.id;});
+    save('prazos',DB.prazos);
+    closeModal(); renderAll(); openProc(proc.id);
+    return;
+  }
   closeModal();if(type==='andamento')openProc(arg);renderAll();
 };
 document.getElementById('overlay').onclick=e=>{if(e.target.id==='overlay')closeModal()};
