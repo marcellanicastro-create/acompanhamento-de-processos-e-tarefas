@@ -183,6 +183,7 @@
       <button class="foot-btn" onclick="document.getElementById('imp').click()">⬆ Restaurar backup</button>
       <input type="file" id="imp" accept=".json" style="display:none" onchange="restore(event)">
       <button class="foot-btn" onclick="exportICS()">📅 Exportar p/ Google Agenda</button>
+      <button class="foot-btn" onclick="openModal('google')">🔗 Conectar Google Agenda</button>
       <div class="foot-note" id="store-state">Dados salvos neste aparelho.</div>
     </div>
   </aside>
@@ -216,7 +217,7 @@
     <!-- PRAZOS -->
     <section class="view" id="v-prazos">
       <div class="head"><div><h2>Prazos & Audiências</h2><div class="sub">Exporte para o Google Agenda com 1 toque</div></div>
-        <button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar agenda</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button></div>
+        <button class="btn btn-gcal" onclick="gSyncAll()" style="margin-right:8px">🔄 Sincronizar Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button></div>
       <div class="card"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div>
     </section>
 
@@ -387,10 +388,10 @@ function renderPrazos(){
   const list=[...DB.prazos].sort((a,b)=>a.data.localeCompare(b.data));
   document.getElementById('prz-body').innerHTML=list.length?list.map(z=>{
     const d=daysUntil(z.data),cls=d<0?'gray':d<=0?'red':d<=3?'amber':'sage',lab=d<0?'Passou':d===0?'Hoje':d===1?'Amanhã':`${d}d`;
-    return`<tr><td><b>${fmtDate(z.data)}</b>${z.hora?'<div class="me">'+z.hora+'</div>':''}<div style="margin-top:4px"><span class="pill ${cls}">${lab}</span></div></td><td><span class="pill ${z.tipo==='Audiência'?'amber':'sage'}">${z.tipo}</span></td><td><b>${esc(z.titulo)}</b>${z.local?'<div class="me">📍 '+esc(z.local)+'</div>':''}${z.obs?'<div class="me">'+esc(z.obs)+'</div>':''}</td><td>${esc(clienteProc(z.processoId))}</td><td style="white-space:nowrap"><button class="btn btn-gcal btn-sm" onclick="gcal('${z.id}')">+ Agenda</button> <button class="del" onclick="delPrazo('${z.id}')">🗑</button></td></tr>`;
+    return`<tr><td><b>${fmtDate(z.data)}</b>${z.hora?'<div class="me">'+z.hora+'</div>':''}<div style="margin-top:4px"><span class="pill ${cls}">${lab}</span></div></td><td><span class="pill ${z.tipo==='Audiência'?'amber':'sage'}">${z.tipo}</span></td><td><b>${esc(z.titulo)}</b>${z.local?'<div class="me">📍 '+esc(z.local)+'</div>':''}${z.obs?'<div class="me">'+esc(z.obs)+'</div>':''}</td><td>${esc(clienteProc(z.processoId))}</td><td style="white-space:nowrap"><button class="btn btn-gcal btn-sm" onclick="gcal('${z.id}')">+ Agenda</button> <button class="del" onclick="delPrazo('${z.id}')">🗑</button>${z.gcalId?'<div class="me" style="color:#3e5a3b;font-weight:600;margin-top:5px">✓ no Google</div>':''}</td></tr>`;
   }).join(''):`<tr><td colspan="5">${empty('⏱','Nenhum prazo cadastrado.')}</td></tr>`;
 }
-function delPrazo(id){if(!confirm('Excluir este prazo?'))return;DB.prazos=DB.prazos.filter(z=>z.id!==id);save('prazos',DB.prazos);renderAll()}
+function delPrazo(id){const z=DB.prazos.find(z=>z.id===id);if(!z)return;if(!confirm('Excluir este prazo?'+(z.gcalId?' (também sai do Google Agenda)':'')))return;if(z.gcalId&&gIsConnected())gDeleteRemote(z.gcalId);DB.prazos=DB.prazos.filter(x=>x.id!==id);save('prazos',DB.prazos);renderAll()}
 
 function delProcesso(id){const p=DB.processos.find(p=>p.id===id);if(!p)return;const nP=DB.prazos.filter(z=>z.processoId===id).length;if(!confirm('Excluir o processo '+p.numero+'?'+(nP?' '+nP+' prazo(s) vinculado(s) ficarão sem processo.':'')))return;DB.processos=DB.processos.filter(x=>x.id!==id);save('processos',DB.processos);show('processos');renderAll()}
 function delCliente(id){const c=DB.clientes.find(c=>c.id===id);if(!c)return;const nP=DB.processos.filter(p=>p.clienteId===id).length;if(!confirm('Excluir o cliente '+c.nome+'?'+(nP?' Atenção: '+nP+' processo(s) vinculado(s) continuarão sem cliente.':'')))return;DB.clientes=DB.clientes.filter(x=>x.id!==id);save('clientes',DB.clientes);renderAll()}
@@ -487,6 +488,11 @@ function openModal(type,arg){
     <div class="field"><label>Cliente</label><select id="f-cli">${cliOpts||'<option value="">— cadastre um cliente —</option>'}</select></div>
     <div class="frow"><div class="field"><label>Data</label><input type="date" id="f-data" value="${todayISO()}"></div><div class="field"><label>Título</label><input id="f-tit"></div></div>
     <div class="field"><label>Anotações / transcrição</label><textarea id="f-notas" style="min-height:130px" placeholder="Cole o texto da reunião ou digite as anotações…"></textarea></div>`;}
+  else if(type==='google'){setTitle('Sincronizar com Google Agenda');body.innerHTML=`
+    <div class="field"><label>Código de acesso do Google (Client ID)</label><input id="g-cid" value="${esc(GCLIENT||'')}" placeholder="...apps.googleusercontent.com"></div>
+    <div class="note">Cole o <b>ID do cliente</b> gerado no Google Cloud (passo a passo no chat). Clique em <b>Salvar</b> e depois em <b>Conectar minha conta Google</b>.</div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="gConnect()">Conectar minha conta Google</button><span id="g-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>
+    <div class="note" style="margin-top:12px">Conectado, use <b>Sincronizar Google</b> na tela de Prazos. Os prazos vão para o seu Google Agenda (sentido app → Google).</div>`;setTimeout(gUpdateStatus,60);}
   document.getElementById('overlay').classList.add('open');
 }
 function calcPrazo(){
@@ -507,6 +513,7 @@ document.getElementById('modal-save').onclick=()=>{
   else if(type==='prazo'){if(!val('f-tit')){alert('Informe a descrição.');return}DB.prazos.push({id:uid(),tipo:val('f-tipo'),titulo:val('f-tit'),data:val('f-data'),hora:val('f-hora'),local:val('f-local'),obs:val('f-obs'),processoId:val('f-proc')});save('prazos',DB.prazos)}
   else if(type==='andamento'){const p=DB.processos.find(p=>p.id===arg);if(p){p.andamentos=p.andamentos||[];p.andamentos.push({id:uid(),data:val('f-data'),texto:val('f-txt')});save('processos',DB.processos)}}
   else if(type==='atend'){DB.atendimentos.push({id:uid(),clienteId:val('f-cli'),data:val('f-data'),titulo:val('f-tit'),notas:val('f-notas')});save('atendimentos',DB.atendimentos)}
+  if(type==='google'){GCLIENT=val('g-cid');save('gclient',GCLIENT);var _s=document.getElementById('g-status');if(_s)_s.textContent='Código salvo — agora clique em Conectar.';return;}
   closeModal();if(type==='andamento')openProc(arg);renderAll();
 };
 document.getElementById('overlay').onclick=e=>{if(e.target.id==='overlay')closeModal()};
@@ -551,6 +558,58 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(function(){});
   });
 }
+</script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+/* ===== Integração Google Agenda (envio app -> Google) ===== */
+var GCLIENT='';
+var gTokenClient=null, gAccessToken=null, gTokenExp=0;
+function gLoadCfg(){ try{ load('gclient','').then(function(v){GCLIENT=v||''; gUpdateStatus();}); }catch(e){} }
+function gIsConnected(){ return !!gAccessToken && Date.now()<gTokenExp; }
+function gUpdateStatus(){ var s=document.getElementById('g-status'); if(s) s.textContent = gIsConnected()?'✓ Conta conectada':(GCLIENT?'Código salvo — clique em Conectar':'Cole seu código e salve'); }
+function gInit(){
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){alert('A biblioteca do Google ainda está carregando. Espere alguns segundos e tente de novo.');return false;}
+  if(!GCLIENT){alert('Cole e salve seu código de acesso (Client ID) primeiro.');return false;}
+  gTokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:GCLIENT,
+    scope:'https://www.googleapis.com/auth/calendar.events',
+    callback:function(resp){
+      if(resp&&resp.access_token){gAccessToken=resp.access_token;gTokenExp=Date.now()+((resp.expires_in||3600)*1000)-60000;gUpdateStatus();alert('Conta Google conectada! Agora vá em Prazos e clique em "Sincronizar Google".');}
+      else{alert('Não foi possível conectar. Confira o código e tente de novo.');}
+    }
+  });
+  return true;
+}
+function gConnect(){
+  var f=document.getElementById('g-cid'); if(f&&f.value.trim()){GCLIENT=f.value.trim();save('gclient',GCLIENT);}
+  if(!gInit())return;
+  gTokenClient.requestAccessToken({prompt:gAccessToken?'':'consent'});
+}
+function gEventBody(z){
+  var desc=(z.obs||'');
+  if(z.processoId){var p=DB.processos.find(function(x){return x.id===z.processoId;});if(p)desc+=(desc?'\n':'')+'Processo: '+p.numero;}
+  var body={summary:'['+z.tipo+'] '+z.titulo+' — '+clienteProc(z.processoId),description:desc,location:z.local||'',reminders:{useDefault:false,overrides:[{method:'popup',minutes:1440},{method:'popup',minutes:120}]}};
+  if(z.hora){var hh=parseInt(z.hora.split(':')[0],10);var mm=z.hora.split(':')[1]||'00';var endh=('0'+((hh+1)%24)).slice(-2);body.start={dateTime:z.data+'T'+z.hora+':00',timeZone:'America/Sao_Paulo'};body.end={dateTime:z.data+'T'+endh+':'+mm+':00',timeZone:'America/Sao_Paulo'};}
+  else{var nx=new Date(z.data);nx.setDate(nx.getDate()+1);body.start={date:z.data};body.end={date:nx.toISOString().slice(0,10)};}
+  return body;
+}
+function gApi(method,path,body){
+  return fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events'+path,{method:method,headers:{'Authorization':'Bearer '+gAccessToken,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.status===204?null:r.json();});
+}
+function gDeleteRemote(gid){ gApi('DELETE','/'+encodeURIComponent(gid)).catch(function(){}); }
+function gSyncAll(){
+  if(!gIsConnected()){ if(confirm('Você precisa conectar sua conta Google primeiro. Abrir a conexão agora?')) openModal('google'); return; }
+  if(!DB.prazos.length){alert('Não há prazos para sincronizar.');return;}
+  var ok=0,err=0,i=0,arr=DB.prazos.slice();
+  (function next(){
+    if(i>=arr.length){ save('prazos',DB.prazos); renderAll(); alert('Sincronização concluída.\n'+ok+' evento(s) no Google Agenda'+(err?'.\n'+err+' com erro — a conexão pode ter expirado; clique em Conectar de novo.':'.')); return; }
+    var z=arr[i++];
+    var op = z.gcalId ? gApi('PATCH','/'+encodeURIComponent(z.gcalId),gEventBody(z)) : gApi('POST','',gEventBody(z)).then(function(ev){z.gcalId=ev.id;});
+    op.then(function(){ok++;next();}).catch(function(){err++;next();});
+  })();
+}
+gLoadCfg();
+
 </script>
 </body>
 </html>
