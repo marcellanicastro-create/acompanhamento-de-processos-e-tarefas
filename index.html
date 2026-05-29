@@ -184,6 +184,7 @@
       <input type="file" id="imp" accept=".json" style="display:none" onchange="restore(event)">
       <button class="foot-btn" onclick="exportICS()">📅 Exportar p/ Google Agenda</button>
       <button class="foot-btn" onclick="openModal('google')">🔗 Conectar Google Agenda</button>
+      <button class="foot-btn" onclick="openModal('djen')">⚖ Buscar no DJEN (OAB)</button>
       <div class="foot-note" id="store-state">Dados salvos neste aparelho.</div>
     </div>
   </aside>
@@ -210,7 +211,7 @@
       <div class="head"><div><h2>Processos</h2><div class="sub">Cadastro e andamento</div></div>
         <button class="btn btn-primary" onclick="openModal('processo')">+ Novo processo</button></div>
       <div class="search"><span>⌕</span><input id="proc-search" placeholder="Buscar nº, cliente ou vara…" oninput="renderProcessos()"></div>
-      <div class="card"><table class="tbl"><thead><tr><th>Nº do processo</th><th>Cliente</th><th>Vara / Tribunal</th><th>Status</th><th>Próximo prazo</th><th></th></tr></thead><tbody id="proc-body"></tbody></table></div>
+      <div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Nº do processo</th><th>Cliente</th><th>Vara / Tribunal</th><th>Status</th><th>Próximo prazo</th><th></th></tr></thead><tbody id="proc-body"></tbody></table></div></div>
     </section>
     <section class="view" id="v-procdetail"></section>
 
@@ -218,7 +219,7 @@
     <section class="view" id="v-prazos">
       <div class="head"><div><h2>Prazos & Audiências</h2><div class="sub">Exporte para o Google Agenda com 1 toque</div></div>
         <button class="btn btn-gcal" onclick="document.getElementById('icsimp').click()" style="margin-right:8px">📥 Importar do Google</button><button class="btn btn-ghost" onclick="gSyncAll()" style="margin-right:8px">🔄 Enviar p/ Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button><input type="file" id="icsimp" accept=".ics,.zip,text/calendar" style="display:none" onchange="importICS(event)"></div>
-      <div class="card"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div>
+      <div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div></div>
     </section>
 
     <!-- CLIENTES -->
@@ -541,6 +542,12 @@ function openModal(type,arg){
     <div class="note">Cole o <b>ID do cliente</b> gerado no Google Cloud (passo a passo no chat). Clique em <b>Salvar</b> e depois em <b>Conectar minha conta Google</b>.</div>
     <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="gConnect()">Conectar minha conta Google</button><span id="g-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>
     <div class="note" style="margin-top:12px">Conectado, use <b>Sincronizar Google</b> na tela de Prazos. Os prazos vão para o seu Google Agenda (sentido app → Google).</div>`;setTimeout(gUpdateStatus,60);}
+  else if(type==='djen'){setTitle('Buscar publicações no DJEN (por OAB)');body.innerHTML=`
+    <div class="field"><label>Endereço da sua ponte (Worker)</label><input id="dj-url" value="${esc(DJURL||'')}" placeholder="https://...workers.dev"></div>
+    <div class="frow"><div class="field"><label>Número da OAB</label><input id="dj-oab" value="${esc(DJOAB||'')}" placeholder="123456"></div><div class="field"><label>UF</label><input id="dj-uf" value="${esc(DJUF||'SP')}" placeholder="SP"></div></div>
+    <div class="field"><label>Buscar dos últimos (dias)</label><input type="number" id="dj-dias" value="30" min="1"></div>
+    <div style="margin-top:6px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="djBuscar()">Buscar publicações</button><span id="dj-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>
+    <div class="note" style="margin-top:14px">As publicações entram como Prazos com a <b>data de disponibilização</b> e o texto completo nas observações. <b>Não são prazos prontos</b> — leia cada uma e calcule o prazo fatal. Clique em Salvar para guardar o endereço e a OAB.</div>`;}
   document.getElementById('overlay').classList.add('open');
 }
 function calcPrazo(){
@@ -562,6 +569,7 @@ document.getElementById('modal-save').onclick=()=>{
   else if(type==='andamento'){const p=DB.processos.find(p=>p.id===arg);if(p){p.andamentos=p.andamentos||[];p.andamentos.push({id:uid(),data:val('f-data'),texto:val('f-txt')});save('processos',DB.processos)}}
   else if(type==='atend'){DB.atendimentos.push({id:uid(),clienteId:val('f-cli'),data:val('f-data'),titulo:val('f-tit'),notas:val('f-notas')});save('atendimentos',DB.atendimentos)}
   if(type==='google'){GCLIENT=val('g-cid');save('gclient',GCLIENT);var _s=document.getElementById('g-status');if(_s)_s.textContent='Código salvo — agora clique em Conectar.';return;}
+  if(type==='djen'){djSaveCfg();var _d=document.getElementById('dj-status');if(_d)_d.textContent='Endereço e OAB salvos.';return;}
   closeModal();if(type==='andamento')openProc(arg);renderAll();
 };
 document.getElementById('overlay').onclick=e=>{if(e.target.id==='overlay')closeModal()};
@@ -657,6 +665,69 @@ function gSyncAll(){
   })();
 }
 gLoadCfg();
+
+</script>
+<script>
+
+/* ===== Busca de publicações no DJEN (via ponte Cloudflare) ===== */
+var DJURL='',DJOAB='',DJUF='SP';
+function djLoadCfg(){ try{
+  load('djurl','').then(function(v){DJURL=v||'';});
+  load('djoab','').then(function(v){DJOAB=v||'';});
+  load('djuf','SP').then(function(v){DJUF=v||'SP';});
+}catch(e){} }
+function djSaveCfg(){ DJURL=val('dj-url'); DJOAB=val('dj-oab'); DJUF=(val('dj-uf')||'SP').toUpperCase();
+  save('djurl',DJURL); save('djoab',DJOAB); save('djuf',DJUF); }
+function djPickDate(v){
+  if(!v) return '';
+  v=String(v);
+  if(/^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0,10);
+  if(/^\d{2}\/\d{2}\/\d{4}/.test(v)){ var p=v.slice(0,10).split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }
+  return '';
+}
+function djField(o,names){ for(var i=0;i<names.length;i++){ if(o[names[i]]!=null && o[names[i]]!=='') return o[names[i]]; } return ''; }
+function djStatus(t){ var s=document.getElementById('dj-status'); if(s)s.textContent=t; }
+function djBuscar(){
+  djSaveCfg();
+  if(!DJURL){ alert('Cole o endereço da sua ponte (Worker) primeiro.'); return; }
+  if(!DJOAB){ alert('Informe o número da OAB.'); return; }
+  var dias=parseInt(val('dj-dias'),10); if(!dias||dias<1)dias=30;
+  var fim=todayISO(); var ini=new Date(Date.now()-dias*864e5).toISOString().slice(0,10);
+  var base=DJURL.replace(/\/+$/,'');
+  var q='?numeroOab='+encodeURIComponent(DJOAB)+'&ufOab='+encodeURIComponent(DJUF)
+        +'&dataDisponibilizacaoInicio='+ini+'&dataDisponibilizacaoFim='+fim
+        +'&pagina=1&itensPorPagina=100';
+  djStatus('Buscando…');
+  fetch(base+q,{headers:{'Accept':'application/json'}})
+    .then(function(r){ return r.text(); })
+    .then(function(txt){
+      var data; try{ data=JSON.parse(txt); }catch(e){ djStatus('Resposta inesperada da ponte.'); alert('A ponte respondeu, mas não em formato esperado. Verifique o endereço do Worker.\n\nInício da resposta:\n'+txt.slice(0,300)); return; }
+      var items = data.items || data.content || data.comunicacoes || (Array.isArray(data)?data:[]);
+      if(!items || !items.length){ djStatus('Nenhuma publicação no período.'); alert('Nenhuma publicação encontrada para essa OAB nos últimos '+dias+' dias.\n(Se você tem certeza que há, me mande o que apareceu aqui: '+(data.message||data.status||'sem mensagem')+')'); return; }
+      var seen={}; DB.prazos.forEach(function(p){ if(p.djenId)seen[String(p.djenId)]=1; });
+      var added=0,dup=0;
+      items.forEach(function(it){
+        var id=djField(it,['id','hash','idComunicacao','idcomunicacao']);
+        if(id && seen[String(id)]){ dup++; return; }
+        var data2=djPickDate(djField(it,['data_disponibilizacao','datadisponibilizacao','dataDisponibilizacao','data']))||todayISO();
+        var numero=djField(it,['numero_processo','numeroprocesso','numeroProcesso']);
+        var orgao=djField(it,['nomeOrgao','nome_orgao','orgao','siglaTribunal','sigla_tribunal']);
+        var tipoC=djField(it,['tipoComunicacao','nomeClasse','tipoDocumento'])||'Publicação';
+        var texto=djField(it,['texto','teor','conteudo']);
+        var titulo=(tipoC?tipoC:'Publicação')+(numero?(' — '+numero):'');
+        var ttipo=/audi[êe]nci/i.test(titulo+' '+texto)?'Audiência':'Prazo';
+        DB.prazos.push({id:uid(),tipo:ttipo,titulo:titulo,data:data2,hora:'',local:orgao||'',
+          obs:(numero?('Processo: '+numero+'\n'):'')+(orgao?(orgao+'\n'):'')+(texto||''),
+          processoId:'',djenId:id||'',fonte:'DJEN'});
+        if(id)seen[String(id)]=1; added++;
+      });
+      save('prazos',DB.prazos); renderAll();
+      djStatus(added+' nova(s) publicação(ões) importada(s).');
+      alert('Pronto! Trouxe '+added+' publicação(ões) do DJEN'+(dup?(' ('+dup+' já existiam)'):'')+'.\n\n⚠️ IMPORTANTE: a DATA mostrada é a de DISPONIBILIZAÇÃO no diário, NÃO o prazo final. Abra cada uma, leia o texto (está no campo de observações) e calcule o prazo fatal usando a calculadora ao criar/editar. Não são prazos prontos.');
+    })
+    .catch(function(e){ djStatus('Erro na busca.'); alert('Não consegui falar com a ponte. Verifique se o endereço do Worker está certo e publicado.\n\nDetalhe: '+e); });
+}
+djLoadCfg();
 
 </script>
 </body>
