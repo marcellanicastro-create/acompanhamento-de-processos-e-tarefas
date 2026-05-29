@@ -217,7 +217,7 @@
     <!-- PRAZOS -->
     <section class="view" id="v-prazos">
       <div class="head"><div><h2>Prazos & Audiências</h2><div class="sub">Exporte para o Google Agenda com 1 toque</div></div>
-        <button class="btn btn-gcal" onclick="gSyncAll()" style="margin-right:8px">🔄 Sincronizar Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button></div>
+        <button class="btn btn-gcal" onclick="document.getElementById('icsimp').click()" style="margin-right:8px">📥 Importar do Google</button><button class="btn btn-ghost" onclick="gSyncAll()" style="margin-right:8px">🔄 Enviar p/ Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button><input type="file" id="icsimp" accept=".ics,.zip,text/calendar" style="display:none" onchange="importICS(event)"></div>
       <div class="card"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div>
     </section>
 
@@ -417,6 +417,54 @@ function exportICS(){
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([out.join('\r\n')],{type:'text/calendar'}));
   a.download='agenda-meujuridico-'+todayISO()+'.ics';a.click();
 }
+
+/* ===== Importar eventos do Google Agenda (.ics) -> app ===== */
+function unfoldICS(t){ return t.replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\n[ \t]/g,''); }
+function icsUnesc(s){ return (s||'').replace(/\\n/gi,'\n').replace(/\\,/g,',').replace(/\\;/g,';').replace(/\\\\/g,'\\').trim(); }
+function parseICS(text){
+  text=unfoldICS(text);
+  var out=[]; var blocks=text.split('BEGIN:VEVENT'); blocks.shift();
+  blocks.forEach(function(b){
+    var body=b.split('END:VEVENT')[0]; var lines=body.split('\n'); var ev={};
+    lines.forEach(function(line){
+      var i=line.indexOf(':'); if(i<0)return;
+      var key=line.slice(0,i), val=line.slice(i+1), name=key.split(';')[0].toUpperCase();
+      if(name==='SUMMARY')ev.summary=icsUnesc(val);
+      else if(name==='LOCATION')ev.location=icsUnesc(val);
+      else if(name==='DESCRIPTION')ev.description=icsUnesc(val);
+      else if(name==='UID')ev.uid=val.trim();
+      else if(name==='DTSTART'){ ev.raw=val.trim(); ev.allDay=/VALUE=DATE/i.test(key)||/^\d{8}$/.test(val.trim()); }
+    });
+    if(ev.raw && /^\d{8}/.test(ev.raw)) out.push(ev);
+  });
+  return out;
+}
+function icsToPrazo(ev){
+  var d=ev.raw.slice(0,8), data=d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8), hora='';
+  if(!ev.allDay && ev.raw.charAt(8)==='T') hora=ev.raw.slice(9,11)+':'+ev.raw.slice(11,13);
+  var sum=ev.summary||'(sem título)';
+  var tipo=/audi[êe]nci/i.test(sum)?'Audiência':'Prazo';
+  return {id:uid(),tipo:tipo,titulo:sum,data:data,hora:hora,local:ev.location||'',obs:ev.description||'',processoId:'',icsUid:ev.uid||''};
+}
+function importICS(e){
+  var f=e.target.files[0]; if(!f){return;}
+  if(/\.zip$/i.test(f.name)){ alert('Esse é o .zip que o Google baixou. Descompacte-o primeiro (clique direito → Extrair) e importe o arquivo .ics de dentro dele.'); e.target.value=''; return; }
+  var rd=new FileReader();
+  rd.onload=function(){
+    try{
+      var evs=parseICS(rd.result);
+      if(!evs.length){ alert('Não encontrei eventos nesse arquivo. Confira se é um .ics exportado do Google Agenda.'); e.target.value=''; return; }
+      var seen={}; DB.prazos.forEach(function(p){ if(p.icsUid)seen[p.icsUid]=1; });
+      var added=0,dup=0;
+      evs.forEach(function(ev){ var p=icsToPrazo(ev); if(p.icsUid&&seen[p.icsUid]){dup++;return;} DB.prazos.push(p); added++; });
+      save('prazos',DB.prazos); renderAll(); show('prazos');
+      alert('Importação concluída.\n'+added+' evento(s) trazido(s) da sua agenda do Google.'+(dup?'\n'+dup+' já existiam e foram ignorados.':'')+'\n\nDica: apague os que não forem jurídicos usando a lixeira 🗑.');
+    }catch(err){ alert('Não consegui ler o arquivo. Confira se é um .ics do Google Agenda.'); }
+    e.target.value='';
+  };
+  rd.readAsText(f);
+}
+
 
 function gcal(id){
   const z=DB.prazos.find(z=>z.id===id);if(!z)return;
