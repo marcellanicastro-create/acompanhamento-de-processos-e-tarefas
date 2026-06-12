@@ -256,7 +256,7 @@
     <!-- PRAZOS -->
     <section class="view" id="v-prazos">
       <div class="head"><div><h2>Prazos & Audiências</h2><div class="sub">Exporte para o Google Agenda com 1 toque</div></div>
-        <button class="btn btn-gcal" onclick="document.getElementById('icsimp').click()" style="margin-right:8px">📥 Importar do Google</button><button class="btn btn-ghost" onclick="gSyncAll()" style="margin-right:8px">🔄 Enviar p/ Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button><input type="file" id="icsimp" accept=".ics,.zip,text/calendar" style="display:none" onchange="importICS(event)"></div>
+        <button class="btn btn-gcal" onclick="gImportAgenda()" style="margin-right:8px">📲 Puxar do Google Agenda</button><button class="btn btn-ghost" onclick="document.getElementById('icsimp').click()" style="margin-right:8px">📥 Importar arquivo .ics</button><button class="btn btn-ghost" onclick="gSyncAll()" style="margin-right:8px">🔄 Enviar p/ Google</button><button class="btn btn-ghost" onclick="exportICS()" style="margin-right:8px">📅 Exportar .ics</button><button class="btn btn-primary" onclick="openModal('prazo')">+ Adicionar</button><input type="file" id="icsimp" accept=".ics,.zip,text/calendar" style="display:none" onchange="importICS(event)"></div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><button class="przchip on" data-f="Todos" onclick="setPrzFilter('Todos')">Todos</button><button class="przchip" data-f="Prazo" onclick="setPrzFilter('Prazo')">Prazos</button><button class="przchip" data-f="Audiência" onclick="setPrzFilter('Audiência')">Audiências</button><button class="przchip" data-f="Compromisso" onclick="setPrzFilter('Compromisso')">Compromissos</button><button class="przchip" style="margin-left:auto" onclick="clearPast()">🗑 Limpar vencidos</button></div>
       <div class="card"><div style="overflow-x:auto"><table class="tbl"><thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Processo</th><th></th></tr></thead><tbody id="prz-body"></tbody></table></div></div>
     </section>
@@ -705,7 +705,7 @@ if ('serviceWorker' in navigator) {
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
 /* ===== Integração Google Agenda (envio app -> Google) ===== */
-var GCLIENT='';
+var GCLIENT='294530895409-d3l8au5ut8o0p78n62rp4k4934etvu4c.apps.googleusercontent.com';
 var gTokenClient=null, gAccessToken=null, gTokenExp=0;
 function gLoadCfg(){ try{ load('gclient','').then(function(v){GCLIENT=v||''; gUpdateStatus();}); }catch(e){} }
 function gIsConnected(){ return !!gAccessToken && Date.now()<gTokenExp; }
@@ -751,6 +751,68 @@ function gSyncAll(){
     op.then(function(){ok++;next();}).catch(function(){err++;next();});
   })();
 }
+
+/* ===== Importar (puxar) eventos do Google Agenda para o app ===== */
+function gConnectThen(cb){
+  if(gIsConnected()){ cb(); return; }
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){ alert('A biblioteca do Google ainda está carregando. Espere alguns segundos e tente de novo.'); return; }
+  if(!GCLIENT){ alert('Código de acesso do Google não configurado.'); return; }
+  var tc=google.accounts.oauth2.initTokenClient({
+    client_id:GCLIENT,
+    scope:'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly',
+    callback:function(resp){
+      if(resp&&resp.access_token){ gAccessToken=resp.access_token; gTokenExp=Date.now()+((resp.expires_in||3600)*1000)-60000; gUpdateStatus(); cb(); }
+      else { alert('Não foi possível conectar sua conta Google. Tente de novo.'); }
+    }
+  });
+  tc.requestAccessToken({prompt:gAccessToken?'':'consent'});
+}
+function gImportAgenda(){
+  var desde = prompt('Trazer reuniões do Google a partir de qual data? (formato AAAA-MM-DD)\n\nDeixe assim para trazer de hoje em diante, ou troque pela data que quiser:', todayISO());
+  if(desde===null) return;
+  desde = (desde||'').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(desde)){ alert('Data inválida. Use o formato AAAA-MM-DD, ex.: 2026-06-01'); return; }
+  gConnectThen(function(){
+    var s=document.getElementById('cloud-state');
+    var timeMin=new Date(desde+'T00:00:00').toISOString();
+    var url='https://www.googleapis.com/calendar/v3/calendars/primary/events'
+      +'?singleEvents=true&orderBy=startTime&maxResults=250'
+      +'&timeMin='+encodeURIComponent(timeMin);
+    fetch(url,{headers:{'Authorization':'Bearer '+gAccessToken}})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(data){
+        var items=(data&&data.items)||[];
+        if(!items.length){ alert('Nenhuma reunião encontrada no Google Agenda a partir de '+fmtDate(desde)+'.'); return; }
+        // evita duplicar: guarda os ids do Google já importados em z.gcalId
+        var jaTem={}; DB.prazos.forEach(function(p){ if(p.gcalId) jaTem[String(p.gcalId)]=1; });
+        var add=0, dup=0, semData=0;
+        items.forEach(function(ev){
+          if(ev.status==='cancelled'){ return; }
+          var gid=ev.id;
+          if(gid && jaTem[String(gid)]){ dup++; return; }
+          var data2='', hora='';
+          if(ev.start && ev.start.dateTime){ var dt=ev.start.dateTime; data2=dt.slice(0,10); hora=dt.slice(11,16); }
+          else if(ev.start && ev.start.date){ data2=ev.start.date; hora=''; }
+          if(!data2){ semData++; return; }
+          var titulo=(ev.summary||'(sem título)');
+          var local=(ev.location||'');
+          var obs=(ev.description||'');
+          DB.prazos.push({ id:uid(), tipo:'Compromisso', titulo:titulo, data:data2, hora:hora, local:local, obs:obs, processoId:'', gcalId:gid });
+          add++;
+        });
+        save('prazos',DB.prazos); renderAll();
+        var msg='Pronto! '+add+' compromisso(s) trazido(s) do Google Agenda.';
+        if(dup) msg+='\n'+dup+' já tinham sido importados antes (ignorados).';
+        if(semData) msg+='\n'+semData+' evento(s) sem data foram ignorados.';
+        alert(msg);
+      })
+      .catch(function(e){
+        console.error('import google',e);
+        alert('Não consegui ler sua agenda do Google: '+e.message+'\n\nSe aparecer erro de permissão, clique em "Conectar Google Agenda" e autorize o acesso à agenda.');
+      });
+  });
+}
+
 gLoadCfg();
 
 </script>
