@@ -829,23 +829,34 @@ function cloudBadge(){
   else { el.textContent='Nuvem configurada — clique em Entrar na nuvem.'; el.style.color='#8a6a1e'; }
 }
 function cloudKeyDoc(){ var F=window.__FB; return F.doc(F.db,'dados','principal'); }
+function _sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 async function cloudPull(){
   if(!cloudReady()||!CLOUD.user) return false;
-  try{
-    var snap=await window.__FB.getDoc(cloudKeyDoc());
-    if(snap.exists()){
-      var d=snap.data()||{};
-      KEYS.forEach(function(k){ DB[k]=Array.isArray(d[k])?d[k]:(DB[k]||[]); });
-      // grava cópia local também (cache offline)
-      KEYS.forEach(function(k){ save(k,DB[k]); });
-      renderAll();
+  var tentativas=4, ultimoErro=null;
+  for(var i=0;i<tentativas;i++){
+    try{
+      var snap=await window.__FB.getDoc(cloudKeyDoc());
+      if(snap.exists()){
+        var d=snap.data()||{};
+        KEYS.forEach(function(k){ DB[k]=Array.isArray(d[k])?d[k]:(DB[k]||[]); });
+        KEYS.forEach(function(k){ save(k,DB[k]); }); // cópia local (cache)
+        renderAll();
+      } else {
+        await cloudPush(true); // primeira vez: sobe o que já existe local
+      }
+      var b=document.getElementById('cloud-state'); if(b){ b.textContent='☁ Salvando na nuvem ('+CLOUD.user+')'; b.style.color='#3e5a3b'; }
       return true;
-    } else {
-      // primeira vez: sobe o que já existe local
-      await cloudPush(true);
-      return true;
+    }catch(e){
+      ultimoErro=e; console.error('pull tentativa '+(i+1),e);
+      // erro "offline" costuma ser a conexão ainda subindo: espera e tenta de novo, em silêncio
+      if(i<tentativas-1) await _sleep(1200*(i+1));
     }
-  }catch(e){ console.error('pull',e); alert('Não consegui ler da nuvem: '+e.message); return false; }
+  }
+  // Só avisa se realmente não conseguiu após várias tentativas. Como salvamos cópia local,
+  // os dados deste aparelho não se perdem; a sincronização se completa quando a conexão voltar.
+  console.error('pull falhou apos '+tentativas+' tentativas', ultimoErro);
+  var b2=document.getElementById('cloud-state'); if(b2){ b2.textContent='☁ Conectada — sincronizando…'; b2.style.color='#8a6a1e'; }
+  return false;
 }
 async function cloudPush(silent){
   if(!cloudReady()||!CLOUD.user) return;
@@ -866,12 +877,19 @@ function cloudLogin(){
     CLOUD.user=cred.user.email; cloudBadge();
     document.getElementById('cl-status').textContent='Conectado! Carregando seus dados…';
     return cloudPull();
-  }).then(function(){
-    document.getElementById('cl-status').textContent='Pronto. Dados sincronizados.';
-    setTimeout(closeModal,900);
+  }).then(function(ok){
+    document.getElementById('cl-status').textContent = ok ? 'Pronto. Dados sincronizados.' : 'Conectada. Sincronizando…';
+    setTimeout(closeModal,1000);
   }).catch(function(e){
     document.getElementById('cl-status').textContent='';
-    alert('Não consegui entrar: '+e.code+'\n\nConfira o e-mail/senha cadastrados no Firebase (Authentication).');
+    var cod=(e&&e.code)||'';
+    if(cod.indexOf('auth/')===0){
+      alert('Não consegui entrar: '+cod+'\n\nConfira o e-mail/senha cadastrados no Firebase (Authentication → Usuários).');
+    } else {
+      // erro de rede/leitura: não trava o login; a sincronização se resolve sozinha
+      document.getElementById('cl-status').textContent='Conectada. Sincronizando…';
+      setTimeout(closeModal,1000);
+    }
   });
 }
 function cloudLogout(){ if(window.__FB&&window.__FB.signOut)window.__FB.signOut(); CLOUD.user=null; cloudBadge(); alert('Você saiu da nuvem neste aparelho. Os dados continuam salvos online.'); }
