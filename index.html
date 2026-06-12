@@ -842,7 +842,9 @@ async function cloudPull(){
         KEYS.forEach(function(k){ save(k,DB[k]); }); // cópia local (cache)
         renderAll();
       } else {
-        await cloudPush(true); // primeira vez: sobe o que já existe local
+        // Nuvem ainda não tem o documento. Só cria a partir do local se o local
+        // tiver dados de verdade — nunca grava um documento vazio.
+        if(!_dbVazio()){ await cloudPush(true); }
       }
       var b=document.getElementById('cloud-state'); if(b){ b.textContent='☁ Salvando na nuvem ('+CLOUD.user+')'; b.style.color='#3e5a3b'; }
       return true;
@@ -858,13 +860,26 @@ async function cloudPull(){
   var b2=document.getElementById('cloud-state'); if(b2){ b2.textContent='☁ Conectada — sincronizando…'; b2.style.color='#8a6a1e'; }
   return false;
 }
+function _dbVazio(){ var tot=0; KEYS.forEach(function(k){ tot+=(DB[k]||[]).length; }); return tot===0; }
 async function cloudPush(silent){
   if(!cloudReady()||!CLOUD.user) return;
   try{
+    // PROTEÇÃO: nunca sobrescrever a nuvem com vazio. Se o local está vazio,
+    // confere se a nuvem tem dados — se tiver, não apaga.
+    if(_dbVazio()){
+      try{
+        var s0=await window.__FB.getDoc(cloudKeyDoc());
+        if(s0.exists()){
+          var d0=s0.data()||{}, temNuvem=0;
+          KEYS.forEach(function(k){ temNuvem+=Array.isArray(d0[k])?d0[k].length:0; });
+          if(temNuvem>0){ console.warn('Push cancelado: local vazio e nuvem tem dados.'); return; }
+        }
+      }catch(e0){ console.warn('Não deu pra checar nuvem antes do push; abortando por segurança.'); return; }
+    }
     var payload={atualizadoEm:new Date().toISOString()};
     KEYS.forEach(function(k){ payload[k]=DB[k]||[]; });
     await window.__FB.setDoc(cloudKeyDoc(), payload);
-    if(!silent){ var b=document.getElementById('cloud-state'); if(b){ var t=b.textContent; b.textContent='☁ Salvo!'; setTimeout(function(){cloudBadge();},1200);} }
+    if(!silent){ var b=document.getElementById('cloud-state'); if(b){ b.textContent='☁ Salvo!'; setTimeout(function(){cloudBadge();},1200);} }
   }catch(e){ console.error('push',e); }
 }
 function cloudQueueSave(){ if(!CLOUD.user)return; clearTimeout(CLOUD.timer); CLOUD.timer=setTimeout(function(){cloudPush(true);},800); }
