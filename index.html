@@ -298,6 +298,7 @@
   <button class="bn" data-view="clientes"><span class="ic">☻</span>Clientes</button>
   <button class="bn" data-view="tarefas"><span class="ic">✓</span>Tarefas</button>
   <button class="bn" data-view="atendimentos"><span class="ic">✎</span>Atend.</button>
+  <button class="bn" onclick="openModal('acoes')"><span class="ic">⋯</span>Mais</button>
 </nav>
 
 <!-- MODAL -->
@@ -621,6 +622,18 @@ function openModal(type,arg){
     <div class="field"><label>E-mail</label><input id="cl-email" type="email" placeholder="voce@exemplo.com"></div>
     <div class="field"><label>Senha</label><input id="cl-senha" type="password"></div>
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="cloudLogin()">Entrar na nuvem</button><button class="btn btn-ghost" onclick="cloudLogout()">Sair</button><span id="cl-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>`;}
+  else if(type==='acoes'){setTitle('Mais opções');body.innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <button class="btn btn-gcal" style="width:100%;justify-content:flex-start" onclick="closeModal();openModal('cloud')">☁ Entrar na nuvem</button>
+      <button class="btn btn-ghost" style="width:100%;justify-content:flex-start" onclick="closeModal();openModal('djen')">⚖ Buscar no DJEN (OAB)</button>
+      <button class="btn btn-ghost" style="width:100%;justify-content:flex-start" onclick="closeModal();openModal('google')">🔗 Conectar Google Agenda</button>
+      <button class="btn btn-ghost" style="width:100%;justify-content:flex-start" onclick="closeModal();backup()">⬇ Fazer backup</button>
+      <button class="btn btn-ghost" style="width:100%;justify-content:flex-start" onclick="closeModal();document.getElementById('imp').click()">⬆ Restaurar backup</button>
+      <div class="note" id="acoes-nuvem" style="margin-top:6px"></div>
+    </div>`;
+    var an=document.getElementById('acoes-nuvem');
+    if(an){ if(typeof CLOUD!=='undefined'&&CLOUD.user){ an.innerHTML='☁ Conectada como <b>'+esc(CLOUD.user)+'</b> — seus dados estão salvando na nuvem.'; } else { an.innerHTML='Você ainda não entrou na nuvem neste aparelho. Toque em <b>Entrar na nuvem</b> e use o mesmo e-mail/senha do computador para baixar seus dados.'; } }
+  }
   document.getElementById('overlay').classList.add('open');
 }
 function calcPrazo(){
