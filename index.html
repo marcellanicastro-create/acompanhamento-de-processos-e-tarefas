@@ -24,7 +24,7 @@
   // ===== Firebase (banco na nuvem) =====
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
   import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+  import { getFirestore, initializeFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
   // ↓↓↓ COLE AQUI O SEU firebaseConfig (entre as chaves) ↓↓↓
   const firebaseConfig = {
@@ -42,7 +42,9 @@
     if (firebaseConfig && firebaseConfig.apiKey) {
       const app = initializeApp(firebaseConfig);
       const auth = getAuth(app);
-      const db = getFirestore(app);
+      let db;
+      try { db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true }); }
+      catch(e){ db = getFirestore(app); }
       window.__FB = { ready:true, auth, db, doc, getDoc, setDoc,
         signIn:(e,s)=>signInWithEmailAndPassword(auth,e,s),
         signOut:()=>signOut(auth),
