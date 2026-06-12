@@ -20,6 +20,38 @@
     .botnav{padding-bottom:calc(8px + env(safe-area-inset-bottom))}
   }
 </style>
+<script type="module">
+  // ===== Firebase (banco na nuvem) =====
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+  // ↓↓↓ COLE AQUI O SEU firebaseConfig (entre as chaves) ↓↓↓
+  const firebaseConfig = {
+    // apiKey: "...",
+    // authDomain: "...",
+    // projectId: "...",
+    // storageBucket: "...",
+    // messagingSenderId: "...",
+    // appId: "..."
+  };
+  // ↑↑↑ NÃO MEXA EM MAIS NADA ABAIXO ↑↑↑
+
+  window.__FB = { ready:false };
+  try {
+    if (firebaseConfig && firebaseConfig.apiKey) {
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getFirestore(app);
+      window.__FB = { ready:true, auth, db, doc, getDoc, setDoc,
+        signIn:(e,s)=>signInWithEmailAndPassword(auth,e,s),
+        signOut:()=>signOut(auth),
+        onAuth:(cb)=>onAuthStateChanged(auth,cb) };
+    }
+  } catch(e){ console.error("Firebase init falhou:", e); }
+  window.dispatchEvent(new Event("fbloaded"));
+</script>
+
 </head>
 <body>
 <!-- ============================================================
@@ -187,6 +219,8 @@
       <button class="foot-btn" onclick="exportICS()">📅 Exportar p/ Google Agenda</button>
       <button class="foot-btn" onclick="openModal('google')">🔗 Conectar Google Agenda</button>
       <button class="foot-btn" onclick="openModal('djen')">⚖ Buscar no DJEN (OAB)</button>
+      <button class="foot-btn" onclick="openModal('cloud')">☁ Entrar na nuvem</button>
+      <div class="foot-note" id="cloud-state" style="margin-top:4px">Verificando nuvem…</div>
       <div class="foot-note" id="store-state">Dados salvos neste aparelho.</div>
     </div>
   </aside>
@@ -282,10 +316,12 @@ async function load(k,def){try{
   return (k in mem)?JSON.parse(mem[k]):def;
 }catch(e){return def}}
 async function save(k,v){const s=JSON.stringify(v);try{
-  if(useWS){await window.storage.set(k,s);return}
-  if(useLS){localStorage.setItem(k,s);return}
-  mem[k]=s;
-}catch(e){console.error(e)}}
+  if(useWS){await window.storage.set(k,s);}
+  else if(useLS){localStorage.setItem(k,s);}
+  else {mem[k]=s;}
+}catch(e){console.error(e)}
+  try{ if(typeof cloudQueueSave==='function') cloudQueueSave(); }catch(e){}
+}
 
 let DB={clientes:[],processos:[],prazos:[],tarefas:[],atendimentos:[]};
 const KEYS=['clientes','processos','prazos','tarefas','atendimentos'];
@@ -578,6 +614,11 @@ function openModal(type,arg){
     +'<div class="note">Ao cadastrar: cria o processo (com a intimação na linha do tempo) e agenda o prazo. A publicação sai da lista solta.</div>';
     }
   }
+  else if(type==='cloud'){setTitle('Entrar na nuvem (Firebase)');body.innerHTML=`
+    <div class="note" style="margin-bottom:14px">Use o e-mail e a senha que você cadastrou no <b>Firebase → Authentication</b>. Faça isso uma vez em cada aparelho (PC e celular) e os dados ficam iguais nos dois, salvos online.</div>
+    <div class="field"><label>E-mail</label><input id="cl-email" type="email" placeholder="voce@exemplo.com"></div>
+    <div class="field"><label>Senha</label><input id="cl-senha" type="password"></div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn btn-gcal" onclick="cloudLogin()">Entrar na nuvem</button><button class="btn btn-ghost" onclick="cloudLogout()">Sair</button><span id="cl-status" style="font-size:12.5px;font-weight:600;color:var(--ink-soft)"></span></div>`;}
   document.getElementById('overlay').classList.add('open');
 }
 function calcPrazo(){
@@ -772,6 +813,78 @@ function djBuscar(){
     .catch(function(e){ djStatus('Erro na busca.'); alert('Não consegui falar com a ponte. Verifique se o endereço do Worker está certo e publicado.\n\nDetalhe: '+e); });
 }
 djLoadCfg();
+
+</script>
+<script>
+
+/* ===== Camada de nuvem (Firebase Firestore) sobre o storage local ===== */
+var CLOUD={on:false,user:null,saving:false,timer:null,docRef:null};
+function cloudReady(){ return window.__FB && window.__FB.ready; }
+function cloudBadge(){
+  var el=document.getElementById('cloud-state'); if(!el)return;
+  if(!cloudReady()){ el.textContent='Nuvem não configurada — dados só neste aparelho.'; el.style.color='var(--ink-soft)'; return; }
+  if(CLOUD.user){ el.textContent='☁ Salvando na nuvem ('+CLOUD.user+')'; el.style.color='#3e5a3b'; }
+  else { el.textContent='Nuvem configurada — clique em Entrar na nuvem.'; el.style.color='#8a6a1e'; }
+}
+function cloudKeyDoc(){ var F=window.__FB; return F.doc(F.db,'dados','principal'); }
+async function cloudPull(){
+  if(!cloudReady()||!CLOUD.user) return false;
+  try{
+    var snap=await window.__FB.getDoc(cloudKeyDoc());
+    if(snap.exists()){
+      var d=snap.data()||{};
+      KEYS.forEach(function(k){ DB[k]=Array.isArray(d[k])?d[k]:(DB[k]||[]); });
+      // grava cópia local também (cache offline)
+      KEYS.forEach(function(k){ save(k,DB[k]); });
+      renderAll();
+      return true;
+    } else {
+      // primeira vez: sobe o que já existe local
+      await cloudPush(true);
+      return true;
+    }
+  }catch(e){ console.error('pull',e); alert('Não consegui ler da nuvem: '+e.message); return false; }
+}
+async function cloudPush(silent){
+  if(!cloudReady()||!CLOUD.user) return;
+  try{
+    var payload={atualizadoEm:new Date().toISOString()};
+    KEYS.forEach(function(k){ payload[k]=DB[k]||[]; });
+    await window.__FB.setDoc(cloudKeyDoc(), payload);
+    if(!silent){ var b=document.getElementById('cloud-state'); if(b){ var t=b.textContent; b.textContent='☁ Salvo!'; setTimeout(function(){cloudBadge();},1200);} }
+  }catch(e){ console.error('push',e); }
+}
+function cloudQueueSave(){ if(!CLOUD.user)return; clearTimeout(CLOUD.timer); CLOUD.timer=setTimeout(function(){cloudPush(true);},800); }
+function cloudLogin(){
+  if(!cloudReady()){ alert('Cole primeiro suas chaves do Firebase no arquivo (instruções no chat).'); return; }
+  var em=val('cl-email'), pw=val('cl-senha');
+  if(!em||!pw){ alert('Informe e-mail e senha cadastrados no Firebase.'); return; }
+  document.getElementById('cl-status').textContent='Entrando…';
+  window.__FB.signIn(em,pw).then(function(cred){
+    CLOUD.user=cred.user.email; cloudBadge();
+    document.getElementById('cl-status').textContent='Conectado! Carregando seus dados…';
+    return cloudPull();
+  }).then(function(){
+    document.getElementById('cl-status').textContent='Pronto. Dados sincronizados.';
+    setTimeout(closeModal,900);
+  }).catch(function(e){
+    document.getElementById('cl-status').textContent='';
+    alert('Não consegui entrar: '+e.code+'\n\nConfira o e-mail/senha cadastrados no Firebase (Authentication).');
+  });
+}
+function cloudLogout(){ if(window.__FB&&window.__FB.signOut)window.__FB.signOut(); CLOUD.user=null; cloudBadge(); alert('Você saiu da nuvem neste aparelho. Os dados continuam salvos online.'); }
+function cloudInit(){
+  window.addEventListener('fbloaded', function(){
+    cloudBadge();
+    if(cloudReady()){
+      window.__FB.onAuth(function(u){
+        if(u){ CLOUD.user=u.email; cloudBadge(); cloudPull(); }
+      });
+    }
+  });
+  if(cloudReady()) cloudBadge();
+}
+cloudInit();
 
 </script>
 </body>
