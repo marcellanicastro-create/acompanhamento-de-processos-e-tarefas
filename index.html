@@ -355,6 +355,20 @@ function cvGetNumero(z){ if(z.numeroProc) return z.numeroProc; var m=(z.obs||'')
 function cvCalc(){ var pub=val('cv-pub'), n=parseInt(val('cv-dias'),10); if(!pub||!n||n<1){ alert('Informe a data da publicação e os dias úteis.'); return; } var fatal=addBiz(pub,n); document.getElementById('cv-data').value=fatal; var r=document.getElementById('cv-res'); if(r){ r.classList.add('show'); r.innerHTML='✔ Prazo fatal sugerido: <b>'+fmtDate(fatal)+'</b> ('+n+' dias úteis após a publicação). Confira e ajuste se necessário.'; } }
 var PRZFILTER='Todos';
 function setPrzFilter(f){ PRZFILTER=f; renderPrazos(); }
+function _addMonths(iso,n){ var d=new Date(iso+'T12:00:00'); var day=d.getDate(); d.setMonth(d.getMonth()+n); if(d.getDate()<day) d.setDate(0); return d.toISOString().slice(0,10); }
+function recurDates(startISO,freq,endISO){
+  var out=[startISO]; if(!freq||freq==='nao'||!endISO) return out;
+  if(endISO<startISO) return out;
+  var cur=startISO, guard=0;
+  while(guard<400){ guard++;
+    var nxt;
+    if(freq==='mensal') nxt=_addMonths(cur,1);
+    else { var d=new Date(cur+'T12:00:00'); d.setDate(d.getDate()+(freq==='semanal'?7:14)); nxt=d.toISOString().slice(0,10); }
+    if(nxt>endISO) break;
+    out.push(nxt); cur=nxt;
+  }
+  return out;
+}
 function clearPast(){ var past=DB.prazos.filter(function(z){return daysUntil(z.data)<0;}); if(!past.length){alert('Não há itens vencidos para limpar.');return;} if(!confirm('Excluir os '+past.length+' item(ns) já vencidos (data anterior a hoje)? Não dá pra desfazer.'))return; past.forEach(function(z){ if(z.gcalId&&gIsConnected())gDeleteRemote(z.gcalId); }); DB.prazos=DB.prazos.filter(function(z){return daysUntil(z.data)>=0;}); save('prazos',DB.prazos); renderAll(); }
 
 
@@ -605,6 +619,7 @@ function openModal(type,arg,editId){
     <div class="field"><label>Tipo</label><select id="f-tipo"><option>Prazo</option><option>Audiência</option><option>Compromisso</option></select></div>
     <div class="field"><label>Descrição</label><input id="f-tit" placeholder="Contestação / Audiência de instrução"></div>
     <div class="frow"><div class="field"><label>Data fatal</label><input type="date" id="f-data" value="${todayISO()}"></div><div class="field"><label>Hora (audiência)</label><input type="time" id="f-hora"></div></div>
+    <div class="frow"><div class="field"><label>Repetir</label><select id="f-rep"><option value="nao">Não repetir</option><option value="mensal">Mensalmente</option><option value="quinzenal">Quinzenalmente</option><option value="semanal">Semanalmente</option></select></div><div class="field"><label>Repetir até (data final)</label><input type="date" id="f-ate"></div></div>
     <div class="field"><label>Processo vinculado</label><select id="f-proc"><option value="">— nenhum —</option>${opts}</select></div>
     <div class="field"><label>Local (audiência)</label><input id="f-local"></div>
     <div class="field"><label>Observações</label><input id="f-obs"></div>
@@ -619,7 +634,8 @@ function openModal(type,arg,editId){
   else if(type==='parcela'){setTitle('Nova parcela do acordo');body.innerHTML=`
     <div class="frow"><div class="field"><label>Data do vencimento</label><input type="date" id="pc-data" value="${todayISO()}"></div><div class="field"><label>Valor (R$)</label><input id="pc-valor" placeholder="1.500,00"></div></div>
     <div class="field"><label>Observação (opcional)</label><input id="pc-obs" placeholder="Ex.: 1ª de 6 parcelas"></div>
-    <div class="note">Vira um compromisso na sua agenda na data do vencimento, vinculado a este processo. Os dados bancários do processo entram na observação.</div>`;}
+    <div class="frow"><div class="field"><label>Repetir</label><select id="pc-rep"><option value="nao">Não repetir</option><option value="mensal">Mensalmente (mesmo dia)</option><option value="quinzenal">Quinzenalmente</option><option value="semanal">Semanalmente</option></select></div><div class="field"><label>Repetir até (data final)</label><input type="date" id="pc-ate"></div></div>
+    <div class="note">Para parcelar: escolha <b>Mensalmente</b> e a <b>data final</b> — o app cria todas as parcelas de uma vez (mesmo valor), cada uma na agenda. Os dados bancários do processo entram na observação.</div>`;}
   else if(type==='google'){setTitle('Sincronizar com Google Agenda');body.innerHTML=`
     <div class="field"><label>Código de acesso do Google (Client ID)</label><input id="g-cid" value="${esc(GCLIENT||'')}" placeholder="...apps.googleusercontent.com"></div>
     <div class="note">Cole o <b>ID do cliente</b> gerado no Google Cloud (passo a passo no chat). Clique em <b>Salvar</b> e depois em <b>Conectar minha conta Google</b>.</div>
@@ -691,7 +707,7 @@ document.getElementById('modal-save').onclick=()=>{
   const {type,arg,editId}=modalCtx||{};
   if(type==='processo'){if(!val('f-num')){alert('Informe o número do processo.');return}if(editId){var _e=DB.processos.find(x=>x.id===editId);if(_e){_e.numero=val('f-num');_e.clienteId=val('f-cli');_e.vara=val('f-vara');_e.tribunal=val('f-trib');_e.objeto=val('f-obj');_e.status=val('f-status');}}else{DB.processos.push({id:uid(),numero:val('f-num'),clienteId:val('f-cli'),vara:val('f-vara'),tribunal:val('f-trib'),objeto:val('f-obj'),status:val('f-status'),andamentos:[]});}save('processos',DB.processos)}
   else if(type==='cliente'){if(!val('f-nome')){alert('Informe o nome.');return}if(editId){var _e=DB.clientes.find(x=>x.id===editId);if(_e){_e.nome=val('f-nome');_e.tel=val('f-tel');_e.email=val('f-email');_e.obs=val('f-obs');}}else{DB.clientes.push({id:uid(),nome:val('f-nome'),tel:val('f-tel'),email:val('f-email'),obs:val('f-obs')});}save('clientes',DB.clientes)}
-  else if(type==='prazo'){if(!val('f-tit')){alert('Informe a descrição.');return}if(editId){var _e=DB.prazos.find(x=>x.id===editId);if(_e){_e.tipo=val('f-tipo');_e.titulo=val('f-tit');_e.data=val('f-data');_e.hora=val('f-hora');_e.local=val('f-local');_e.obs=val('f-obs');_e.processoId=val('f-proc');}}else{DB.prazos.push({id:uid(),tipo:val('f-tipo'),titulo:val('f-tit'),data:val('f-data'),hora:val('f-hora'),local:val('f-local'),obs:val('f-obs'),processoId:val('f-proc')});}save('prazos',DB.prazos)}
+  else if(type==='prazo'){if(!val('f-tit')){alert('Informe a descrição.');return}if(editId){var _e=DB.prazos.find(x=>x.id===editId);if(_e){_e.tipo=val('f-tipo');_e.titulo=val('f-tit');_e.data=val('f-data');_e.hora=val('f-hora');_e.local=val('f-local');_e.obs=val('f-obs');_e.processoId=val('f-proc');}}else{var _ds=recurDates(val('f-data'),val('f-rep'),val('f-ate'));_ds.forEach(function(_dt){DB.prazos.push({id:uid(),tipo:val('f-tipo'),titulo:val('f-tit'),data:_dt,hora:val('f-hora'),local:val('f-local'),obs:val('f-obs'),processoId:val('f-proc')});});if(_ds.length>1)alert(_ds.length+' itens criados na agenda (recorrência).');}save('prazos',DB.prazos)}
   else if(type==='andamento'){const p=DB.processos.find(p=>p.id===arg);if(p){p.andamentos=p.andamentos||[];if(editId){var _e=p.andamentos.find(a=>a.id===editId);if(_e){_e.data=val('f-data');_e.texto=val('f-txt');}}else{p.andamentos.push({id:uid(),data:val('f-data'),texto:val('f-txt')});}save('processos',DB.processos)}}
   else if(type==='atend'){if(editId){var _e=DB.atendimentos.find(x=>x.id===editId);if(_e){_e.clienteId=val('f-cli');_e.data=val('f-data');_e.titulo=val('f-tit');_e.notas=val('f-notas');}}else{DB.atendimentos.push({id:uid(),clienteId:val('f-cli'),data:val('f-data'),titulo:val('f-tit'),notas:val('f-notas')});}save('atendimentos',DB.atendimentos)}
   if(type==='google'){GCLIENT=val('g-cid');save('gclient',GCLIENT);var _s=document.getElementById('g-status');if(_s)_s.textContent='Código salvo — agora clique em Conectar.';return;}
@@ -711,9 +727,13 @@ document.getElementById('modal-save').onclick=()=>{
         else { var nz={id:uid(),tipo:'Compromisso',titulo:titulo,data:d,hora:'',local:'',obs:obsPrazo,processoId:pp.id}; DB.prazos.push(nz); pc.prazoId=nz.id; }
       }
     } else {
-      var prc={id:uid(),data:d,valor:v,obs:ob,pago:false};
-      var nz2={id:uid(),tipo:'Compromisso',titulo:titulo,data:d,hora:'',local:'',obs:obsPrazo,processoId:pp.id};
-      DB.prazos.push(nz2); prc.prazoId=nz2.id; ac.parcelas.push(prc);
+      var _ds=recurDates(d,val('pc-rep'),val('pc-ate'));
+      _ds.forEach(function(_dt){
+        var nz2={id:uid(),tipo:'Compromisso',titulo:titulo,data:_dt,hora:'',local:'',obs:obsPrazo,processoId:pp.id};
+        DB.prazos.push(nz2);
+        ac.parcelas.push({id:uid(),data:_dt,valor:v,obs:ob,pago:false,prazoId:nz2.id});
+      });
+      if(_ds.length>1) setTimeout(function(){alert(_ds.length+' parcelas criadas (recorrência), cada uma na agenda.');},50);
     }
     save('processos',DB.processos); save('prazos',DB.prazos);
     closeModal(); renderAll(); openProc(pp.id);
